@@ -31,9 +31,9 @@ else:
     exit()
 
 # nested dictionary that will store for each peptide:
-# - list of the 0-based positions of the biotinylated K residues
-# - total number of lysines (K) in peptide
-# - whether it meets the criteria to keep
+# - list of the 0-based positions of the modified (biotinylated) K residues
+# - list of the 0-based positions of the unmodified (not biotinylated) K residues
+# - first confirming ion detected for a peptide of distinct modified sequence and charge
 modifiedPeptides = {}
 
 def getModKPositions(row):
@@ -50,6 +50,7 @@ def getModKPositions(row):
         # library type is Spectronaut
         # get a version of ModifiedPeptide that has [Biotin-NHS-K] as the only modification
         string = re.sub('[^K]\[[^\]]*\]', 'X', row['ModifiedPeptide'].strip('_')[20: ])
+        # assuming ? symbol is not originally used anywhere in the ModifiedPeptide notation
         string = string.replace('Biotin-NHS-K', '?')
         string = re.sub('\[[^\?]*\]', '', string)
         string = string.replace('?', 'Biotin-NHS-K')
@@ -59,33 +60,36 @@ def getModKPositions(row):
         return indices
 
 def check(row):
-    if row[modPeptideColName] not in list(modifiedPeptides.keys()):
+    keyName = row[modPeptideColName] + '|' + str(row['PrecursorCharge'])
+    if keyName not in list(modifiedPeptides.keys()):
         # initialize entry into dict
-        modifiedPeptides[row[modPeptideColName]] = {'modified_K_positions': getModKPositions(row)}
-        modifiedPeptides[row[modPeptideColName]]['total_num_K'] = row[stripPeptideColName].count('K')
-        modifiedPeptides[row[modPeptideColName]]['meetsCriteria'] = False
-    if not modifiedPeptides[row[modPeptideColName]]['meetsCriteria']:
+        modifiedPeptides[keyName] = {'modified_K_positions': getModKPositions(row)}
+        modifiedPeptides[keyName]['unmodified_K_positions'] = list(set([i for i in range(len(row[stripPeptideColName])) if row[stripPeptideColName].startswith('K', i)]) - set(modifiedPeptides[keyName]['modified_K_positions'])) 
+        modifiedPeptides[keyName]['confirming_fragment_ion'] = ''
+    if modifiedPeptides[keyName]['confirming_fragment_ion'] == '':
         if row['FragmentType'] == 'b':
             b_ion_frag = row[stripPeptideColName][: row[ionNumColName]]
             indices = [i for i in range(len(b_ion_frag)) if b_ion_frag.startswith('K', i)]
             # b-ion fragment can have K residues as long as they're modified
-            if set(indices).issubset(set(modifiedPeptides[row[modPeptideColName]]['modified_K_positions'])): 
-                modifiedPeptides[row[modPeptideColName]]['meetsCriteria'] = True              
+            if set(indices).issubset(set(modifiedPeptides[keyName]['modified_K_positions'])): 
+                modifiedPeptides[keyName]['confirming_fragment_ion'] = row['FragmentType'] + str(row[ionNumColName])          
         elif row['FragmentType'] == 'y':
             y_ion_frag = row[stripPeptideColName][-row[ionNumColName]: ]
-            if y_ion_frag.count('K') == modifiedPeptides[row[modPeptideColName]]['total_num_K']:
-                modifiedPeptides[row[modPeptideColName]]['meetsCriteria'] = True
+            indices = [len(row[stripPeptideColName]) - len(y_ion_frag) + i for i in range(len(y_ion_frag)) if y_ion_frag.startswith('K', i)]
+            # y-ion fragment needs to have at least all of the unmodified K residues           
+            if set(modifiedPeptides[keyName]['unmodified_K_positions']).issubset(set(indices)):
+                modifiedPeptides[keyName]['confirming_fragment_ion'] = row['FragmentType'] + str(row[ionNumColName])
     
 library.apply(lambda row: check(row), axis=1)
 
 # list of peptides to keep
 filteredPeptides = []
 for peptide in modifiedPeptides:
-    if modifiedPeptides[peptide]['meetsCriteria']:
+    if modifiedPeptides[peptide]['confirming_fragment_ion'] != '':
         filteredPeptides.append(peptide)
 
 # filtered library below
-library = library[library.apply(lambda row: row[modPeptideColName] in filteredPeptides, axis=1)]
+library = library[library.apply(lambda row: row[modPeptideColName] + '|' + str(row['PrecursorCharge']) in filteredPeptides, axis=1)]
 
 # output filtered library in the same directory as script
 library.to_csv('filtered_' + fileName, sep='\t', index=False)
