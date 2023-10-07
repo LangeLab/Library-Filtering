@@ -162,16 +162,40 @@ def process_spectral_library(
         library["isWithin"] = (
             library[msColName] > (library[pqColName] / 10)
         )
-        cols1 = ["ID", "isWithin", mod_peptide_col_name, ion_col_name, charge_col_name]
-        cols2 = ['ID', 'isWithin', 'StrippedSequence', 'SequenceLength', 'ModifiedSequence', 'FragmentType', 'FragmentNumber']
+        cols1 = [
+            "ID", "isWithin", 
+            mod_peptide_col_name, 
+            ion_col_name, 
+            charge_col_name
+        ]
+        cols2 = [
+            'ID', 'isWithin', 
+            'StrippedSequence', 
+            'SequenceLength', 
+            'ModifiedSequence', 
+            'FragmentType', 
+            'FragmentNumber'
+        ]
     else:
         library["ID"] = (
             library[mod_peptide_col_name] + 
             "_" + 
             library[charge_col_name].astype(str)
         )
-        cols1 = ["ID", mod_peptide_col_name, ion_col_name, charge_col_name]
-        cols2 = ['ID', 'StrippedSequence', 'SequenceLength', 'ModifiedSequence', 'FragmentType', 'FragmentNumber']
+        cols1 = [
+            "ID", 
+            mod_peptide_col_name, 
+            ion_col_name, 
+            charge_col_name
+        ]
+        cols2 = [
+            'ID', 
+            'StrippedSequence', 
+            'SequenceLength', 
+            'ModifiedSequence', 
+            'FragmentType', 
+            'FragmentNumber'
+        ]
 
     if verbose:
         # Print the number of unique precursors in the initial data
@@ -180,8 +204,17 @@ def process_spectral_library(
     # Select a subset of the data
     data = library[cols1].copy()
 
-    # Filter out rows with no (Unimod:3) at the start (N-terminus) of PEP.GroupingKey
-    data = data[data[mod_peptide_col_name].str.startswith(mod_pattern)]
+    # N-term Modification pattern 
+    #   Matches the beginning of the string and 
+    #   Matches the pattern of the form `(UniMod:[0-9]+)`
+    # TODO: In the future different labeling styles need to be considered
+    nterm_mod_pattern = re.compile(r'^\([^)]*\)') 
+    # Remove all rows that do not have a modification at the N-terminus
+    data = data[
+        data[mod_peptide_col_name].astype(str).apply(
+            lambda x: bool(nterm_mod_pattern.search(x))
+        )
+    ]
 
     if verbose:
         # Print the number of unique precursors after selecting Nterm label only precusors
@@ -200,9 +233,14 @@ def process_spectral_library(
     data["FragmentNumber"] = data["FragmentNumber"].astype(int)
 
     # Create new columns to store modified (without N-term mod) and stripped sequences
-    data["ModifiedSequence"] = data[mod_peptide_col_name].str[len(mod_pattern):]
+    data["ModifiedSequence"] = data[mod_peptide_col_name].str.replace(
+        # Only remove the N-term mod
+        nterm_mod_pattern, 
+        ''
+    )
     data["StrippedSequence"] = data["ModifiedSequence"].str.replace(
-        r'\(UniMod:\d+\)', # TODO: More robust to multiple mod labeling types
+        # Removes all the mod labels with the form `(UniMod:[0-9]+)`
+        r'\(UniMod:\d+\)', 
         '', 
         regex=True
     )
@@ -311,8 +349,14 @@ def process_spectral_library(
     # Check if the fragment ion and the number are correct for K and Biotin Labels
     data["correct_fragment_ion"] = data.apply(
         lambda row: (
-            (row["FragmentType"] == 'b' and set(row["BeforeFragmentKPos"]).issubset(set(row["ModifiedKPositions"]))) or
-            (row["FragmentType"] == 'y' and set(row["UnmodifiedKPositions"]).issubset(set(row["AfterFragmentKPos"])))
+            (
+                row["FragmentType"] == 'b' and 
+                set(row["BeforeFragmentKPos"]).issubset(set(row["ModifiedKPositions"]))
+            ) or
+            (
+                row["FragmentType"] == 'y' and 
+                set(row["UnmodifiedKPositions"]).issubset(set(row["AfterFragmentKPos"]))
+            )
         ), 
         axis=1
     )

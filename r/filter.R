@@ -124,12 +124,18 @@ process_spectral_library <- function(library, library_type, verbose = FALSE) {
     message(paste(" -> Initial Data has", length(unique(library$ID)), "unique ids to check"))
   }
   
+  # N-term Modification pattern
+  # Matches the beginning of the string and
+  # Matches the pattern of the form `(UniMod:[0-9]+)`
+  # TODO: In the future different labeling styles need to be considered
+  nterm_mod_pattern <- "^\\([^)]*\\)"
+
   # Select a subset of the data
   data <- library %>% 
     # Select only columns to be used
     select(all_of(cols1)) %>%
-    # Filter entries that start with mod_pattern
-    filter(str_starts(.data[[mod_peptide_col_name]], fixed(mod_pattern)))
+    # Filter entries that start with nterm_mod_pattern
+    filter(str_detect(.data[[mod_peptide_col_name]], nterm_mod_pattern))
   
   if (verbose) {
     # Print the number of unique precursors after selecting Nterm label only precursors
@@ -147,7 +153,7 @@ process_spectral_library <- function(library, library_type, verbose = FALSE) {
   data <- data %>%
     mutate(
       # Remove the first mod_pattern (which all rows start with)
-      ModifiedSequence = str_remove(.data[[mod_peptide_col_name]], fixed(mod_pattern)),
+      ModifiedSequence = str_remove(.data[[mod_peptide_col_name]], nterm_mod_pattern),
       StrippedSequence = str_replace_all(
         ModifiedSequence,
         "\\(UniMod:\\d+\\)",
